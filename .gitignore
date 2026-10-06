@@ -1,0 +1,13 @@
+node_modules/
+out/
+dist/
+release/
+.env
+engine/.venv/
+engine/build/
+engine/dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.tsbuildinfo
+*.log

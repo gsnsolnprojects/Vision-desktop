@@ -166,6 +166,7 @@ function registerIpc(): void {
     isPackaged: app.isPackaged,
   }));
   ipcMain.handle("app:openLogs", () => shell.openPath(join(dataDir, "logs")));
+  ipcMain.handle("app:openRuntimeLog", () => shell.openPath(engine.runtime.logPath));
   ipcMain.handle("app:toggleFullscreen", () => {
     if (!win) return false;
     win.setFullScreen(!win.isFullScreen());

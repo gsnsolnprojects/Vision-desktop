@@ -1,6 +1,16 @@
 /** Types shared by the main process, preload bridge and renderer. */
 
-export type EngineState = "starting" | "ready" | "restarting" | "failed" | "stopped";
+export type EngineState = "installing" | "starting" | "ready" | "restarting" | "failed" | "stopped";
+
+/** First-run AI runtime installation progress (packaged app only). */
+export interface RuntimeSetup {
+  phase: "idle" | "checking" | "creating" | "downloading" | "installing" | "verifying" | "done" | "failed";
+  message: string;
+  detail: string | null;
+  log: string[];
+  error: string | null;
+  startedAt: string | null;
+}
 
 export interface EngineInfo {
   state: EngineState;
@@ -9,6 +19,7 @@ export interface EngineInfo {
   token: string | null;
   error: string | null;
   restarts: number;
+  setup: RuntimeSetup | null;
 }
 
 export interface AppSettings {
@@ -67,6 +78,7 @@ export interface StationApi {
   app: {
     info(): Promise<AppInfo>;
     openLogs(): Promise<void>;
+    openRuntimeLog(): Promise<void>;
     toggleFullscreen(): Promise<boolean>;
   };
 }

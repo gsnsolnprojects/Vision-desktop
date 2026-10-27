@@ -17,6 +17,17 @@ export interface StationModel {
   metrics: { mAP50?: number; precision?: number; recall?: number } | null;
   importedAt: string | null;
   sizeBytes: number;
+  /** TensorRT ("Fastest") availability for this station's GPU. */
+  tensorrt?: { supported: boolean; ready: boolean; gpuName: string | null };
+}
+
+export interface OptimizeJob {
+  id: string;
+  modelId: string;
+  gpuName: string;
+  status: "running" | "done" | "failed";
+  elapsedS: number;
+  error: string | null;
 }
 
 export interface CameraInfo {
@@ -63,6 +74,12 @@ export interface Detection {
   polygon?: [number, number][];
 }
 
+export interface CameraHealth {
+  brightness: number | null;
+  dark: boolean;
+  slow: boolean;
+}
+
 export interface FrameHeader {
   type: "frame";
   runId: string;
@@ -75,6 +92,7 @@ export interface FrameHeader {
   productInRegion: boolean;
   analytics: RunAnalytics;
   defectCount: number;
+  cameraHealth?: CameraHealth;
   stats: RunStats & { inferMsFrame?: number; latencyMsFrame?: number };
 }
 
@@ -105,7 +123,7 @@ export interface ActiveRun {
   id: string;
   startedAt: string;
   live: LiveSettings & Record<string, unknown>;
-  camera: { status: "connecting" | "streaming" | "reconnecting"; error: string | null; resolution: [number, number] };
+  camera: { status: "connecting" | "streaming" | "reconnecting"; error: string | null; resolution: [number, number]; health?: CameraHealth };
   analytics: RunAnalytics;
   stats: RunStats;
 }
@@ -175,7 +193,7 @@ export interface StartRunRequest {
   modelId: string;
   camera: { cameraId: string; cameraName?: string; width: number; height: number; fps: number };
   live: LiveSettings;
-  precision: "fp32" | "fp16";
+  precision: "fp32" | "fp16" | "trt";
   gpuIndex?: number | null;
   streamQuality?: number;
   presetName?: string | null;
@@ -224,6 +242,9 @@ export class EngineClient {
     this.request<{ job: DownloadJob }>("POST", "/models/download", info).then((r) => r.job);
   downloadStatus = (jobId: string) =>
     this.request<{ job: DownloadJob }>("GET", `/models/download/${jobId}`).then((r) => r.job);
+  optimizeModel = (id: string, gpuIndex?: number | null) =>
+    this.request<{ job: OptimizeJob }>("POST", `/models/${encodeURIComponent(id)}/optimize${gpuIndex != null ? `?gpu_index=${gpuIndex}` : ""}`).then((r) => r.job);
+  optimizeStatus = (jobId: string) => this.request<{ job: OptimizeJob }>("GET", `/models/optimize/${jobId}`).then((r) => r.job);
   deleteModel = (id: string) => this.request("DELETE", `/models/${encodeURIComponent(id)}`);
 
   startRun = (req: StartRunRequest) => this.request<EngineStatus>("POST", "/runs/start", req);

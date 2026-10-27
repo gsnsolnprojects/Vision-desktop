@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, CloudDownload, FolderOpen, HardDrive, Loader2, Play, RefreshCw, Trash2 } from "lucide-react";
+import { CheckCircle2, CloudDownload, FolderOpen, HardDrive, Loader2, Play, RefreshCw, Trash2, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/lib/auth";
 import { listLibraryModels, type LibraryModel } from "@/lib/backend";
-import type { DownloadJob, StationModel } from "@/lib/engine";
+import type { DownloadJob, OptimizeJob, StationModel } from "@/lib/engine";
 import { useStation } from "@/lib/station";
 import { supabase } from "@/lib/supabase";
 import { errorMessage, formatBytes, formatDateTime } from "@/lib/utils";
@@ -35,6 +35,7 @@ export function ModelsPage({ onNavigate }: { onNavigate: (p: Page) => void }) {
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [jobs, setJobs] = useState<Record<string, DownloadJob>>({});
   const finishedJobs = useRef(new Set<string>());
+  const [optimizing, setOptimizing] = useState<OptimizeJob | null>(null);
 
   const project = projects.find((p) => p.id === projectId) ?? null;
   const activeModelId = status?.state === "running" ? status.model?.id : null;
@@ -155,6 +156,36 @@ export function ModelsPage({ onNavigate }: { onNavigate: (p: Page) => void }) {
     }
   };
 
+  // Poll the TensorRT build (takes a few minutes).
+  useEffect(() => {
+    if (!client || optimizing?.status !== "running") return;
+    const t = window.setInterval(async () => {
+      try {
+        const job = await client.optimizeStatus(optimizing.id);
+        setOptimizing(job);
+        if (job.status === "done") {
+          toast.success("Model optimised for this GPU", { description: "Choose 'Fastest (TensorRT)' in Run Setup." });
+          void refreshLocal();
+        } else if (job.status === "failed") {
+          toast.error("Optimisation failed", { description: job.error ?? undefined });
+        }
+      } catch {
+        /* engine restarting */
+      }
+    }, 2000);
+    return () => window.clearInterval(t);
+  }, [client, optimizing?.id, optimizing?.status, refreshLocal]);
+
+  const optimize = async (m: StationModel) => {
+    if (!client) return;
+    try {
+      const { gpuIndex } = await window.station.settings.get();
+      setOptimizing(await client.optimizeModel(m.id, gpuIndex));
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
   const remove = async (m: StationModel) => {
     if (!client) return;
     if (!window.confirm(`Remove "${m.name}" from this station? Past reports are kept.`)) return;
@@ -211,6 +242,11 @@ export function ModelsPage({ onNavigate }: { onNavigate: (p: Page) => void }) {
                       <Badge variant="secondary">{m.modelType}</Badge>
                       <Badge variant={m.source === "library" ? "default" : "outline"}>{m.source === "library" ? "Library" : "File"}</Badge>
                       {activeModelId === m.id && <Badge className="bg-red-600">Running</Badge>}
+                      {m.tensorrt?.ready && (
+                        <Badge variant="outline" className="border-emerald-500 text-emerald-500" title={`Optimised for ${m.tensorrt.gpuName}`}>
+                          TensorRT ready
+                        </Badge>
+                      )}
                     </div>
                     <p className="mt-1 truncate text-xs text-muted-foreground">
                       {m.project ? `${m.project} · ` : ""}
@@ -218,6 +254,23 @@ export function ModelsPage({ onNavigate }: { onNavigate: (p: Page) => void }) {
                       {formatBytes(m.sizeBytes)} · added {formatDateTime(m.importedAt)}
                     </p>
                   </div>
+                  {m.tensorrt?.supported && !m.tensorrt.ready && (
+                    optimizing?.modelId === m.id && optimizing.status === "running" ? (
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground" title="Building a TensorRT engine for this GPU. This takes a few minutes and only happens once.">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Optimising… {Math.floor(optimizing.elapsedS / 60)}:{String(Math.floor(optimizing.elapsedS % 60)).padStart(2, "0")} (usually 3–6 min)
+                      </span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void optimize(m)}
+                        disabled={!!activeModelId || optimizing?.status === "running"}
+                        title={activeModelId ? "Stop the run first" : "Build a TensorRT engine for this GPU (about 2x faster). Takes a few minutes, once."}
+                      >
+                        <Zap className="mr-1.5 h-3.5 w-3.5" /> Optimize for this GPU
+                      </Button>
+                    )
+                  )}
                   <Button size="sm" onClick={() => use(m)}>
                     <Play className="mr-1.5 h-3.5 w-3.5" /> Use
                   </Button>

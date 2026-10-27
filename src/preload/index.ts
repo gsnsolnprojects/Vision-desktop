@@ -28,6 +28,7 @@ const api: StationApi = {
   app: {
     info: () => ipcRenderer.invoke("app:info"),
     openLogs: () => ipcRenderer.invoke("app:openLogs"),
+    openRuntimeLog: () => ipcRenderer.invoke("app:openRuntimeLog"),
     toggleFullscreen: () => ipcRenderer.invoke("app:toggleFullscreen"),
   },
 };

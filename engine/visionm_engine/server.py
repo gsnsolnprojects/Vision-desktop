@@ -177,7 +177,18 @@ def create_app(data_dir: Path, token: str) -> FastAPI:
 
     @app.get("/models", dependencies=[Depends(auth)])
     def models() -> dict:
-        return {"models": [meta_to_json(m) for m in station.models.list()]}
+        return {"models": [station.model_json(m) for m in station.models.list()]}
+
+    @app.post("/models/{model_id}/optimize", dependencies=[Depends(auth)])
+    def optimize_model(model_id: str, gpu_index: int | None = None) -> dict:
+        return {"job": station.optimize_model(model_id, gpu_index)}
+
+    @app.get("/models/optimize/{job_id}", dependencies=[Depends(auth)])
+    def optimize_status(job_id: str) -> dict:
+        job = station.optimizer.job(job_id)
+        if job is None:
+            raise HTTPException(404, "Unknown optimisation job")
+        return {"job": job.to_json()}
 
     @app.post("/models/import", dependencies=[Depends(auth)])
     def import_model(body: ImportModelRequest) -> dict:

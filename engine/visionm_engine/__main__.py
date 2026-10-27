@@ -89,6 +89,11 @@ def main() -> None:
     async def startup(sockets=None):
         await original_startup(sockets=sockets)
         print(f"ENGINE_READY port={port}", flush=True)
+        # From here on stdout carries nothing the app needs. Libraries (TensorRT, Ultralytics) print a lot,
+        # some from native code; point fd 1 at stderr so a reader that only wanted the handshake can never
+        # make the engine block on a full stdout pipe.
+        sys.stdout.flush()
+        os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
 
     server.startup = startup  # type: ignore[method-assign]
     server.run(sockets=[sock])

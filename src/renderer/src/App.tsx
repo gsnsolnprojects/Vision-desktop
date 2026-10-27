@@ -12,12 +12,19 @@ import { LivePage } from "@/pages/LivePage";
 import { ReportsPage } from "@/pages/ReportsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { EngineBanner } from "@/components/EngineBanner";
+import { RuntimeSetupScreen } from "@/components/RuntimeSetupScreen";
+import { useEngine } from "@/lib/engine";
 import { GpuWarningBanner } from "@/components/GpuWarningBanner";
 import { StorageWarningBanner } from "@/components/StorageWarningBanner";
 
 export type Page = "live" | "setup" | "models" | "reports" | "settings";
 
 export default function App() {
+  const { info } = useEngine();
+  // Installed app, first launch: the AI runtime must be downloaded before anything else can work.
+  if (info && (info.state === "installing" || info.setup?.phase === "failed")) {
+    return <RuntimeSetupScreen info={info} />;
+  }
   return (
     <AuthProvider>
       <Gate />

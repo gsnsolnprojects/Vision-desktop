@@ -1,9 +1,9 @@
-# Vision-M Station engine.
-# PyTorch with CUDA is installed separately (matching the station's NVIDIA driver), e.g.:
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# Vision-M Station engine (development). Production stations install the pinned set in requirements.lock.
+# PyTorch with CUDA is installed separately to match the NVIDIA driver, e.g.:
+#   pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121
 ultralytics>=8.4
 rfdetr
-opencv-python>=4.10
+opencv-python==4.10.0.84
 numpy
 pillow
 fastapi>=0.115
@@ -13,4 +13,8 @@ openpyxl>=3.1
 cv2-enumerate-cameras
 nvidia-ml-py
 psutil
+harvesters
+tensorrt-cu12
+onnx
+onnxslim
 pytest

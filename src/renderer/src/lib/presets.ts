@@ -10,11 +10,13 @@ export interface RunPreset {
   width: number;
   height: number;
   fps: number;
-  precision: "fp32" | "fp16";
+  precision: Precision;
   live: LiveSettings;
   display: DisplaySettings;
   updatedAt: string;
 }
+
+export type Precision = "fp32" | "fp16" | "trt";
 
 export interface DisplaySettings {
   showBoxes: boolean;

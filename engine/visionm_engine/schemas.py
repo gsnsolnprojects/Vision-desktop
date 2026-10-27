@@ -44,7 +44,7 @@ class StartRunRequest(ApiModel):
     model_id: str
     camera: CameraConfig
     live: LiveSettings = Field(default_factory=LiveSettings)
-    precision: Literal["fp32", "fp16"] = "fp32"
+    precision: Literal["fp32", "fp16", "trt"] = "fp32"  # trt = TensorRT FP16 engine (YOLO, after optimisation)
     gpu_index: int | None = Field(None, ge=0, le=15)  # None = first NVIDIA GPU
     stream_quality: int = Field(80, ge=40, le=95)
     preset_name: str | None = None

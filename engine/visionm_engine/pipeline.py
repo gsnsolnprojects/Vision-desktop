@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Callable, Generic, TypeVar
 
 from .annotate import annotate, encode_jpeg, make_thumbnail
+from .camera_health import CameraHealth, brightness
 from .cameras import CameraError, CameraSettings, create_camera
 from .detectors import Detector
 from .run_store import RunStore, now_iso
@@ -85,6 +86,7 @@ class CaptureWorker(threading.Thread):
         self.resolution = (0, 0)
         self.fps = Ema(0.05)
         self.first_frame = threading.Event()
+        self.health = CameraHealth()
         self._seq = 0
 
     def run(self) -> None:
@@ -110,6 +112,9 @@ class CaptureWorker(threading.Thread):
                     self.fps.add(1.0 / max(now - last, 1e-6))
                     last = now
                     self._seq += 1
+                    mono = time.monotonic()
+                    if self.health.due(mono):
+                        self.health.update(brightness(img), self.fps.value, mono)
                     self.out.put(Frame(image=img, seq=self._seq, captured_at=time.monotonic(), wall_time=time.time()))
                     self.first_frame.set()
             except Exception as exc:  # camera unplugged, driver error, ...
@@ -327,6 +332,7 @@ class Run:
                     "productInRegion": r.outcome.product_in_region,
                     "analytics": self.analytics_json(),
                     "defectCount": self._last_defect_count,
+                    "cameraHealth": self.capture.health.to_json(),
                     "stats": {
                         **self.stats.to_json(),
                         "cameraFps": round(self.capture.fps.value, 1) if self.capture.fps.value else None,

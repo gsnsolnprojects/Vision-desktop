@@ -132,6 +132,7 @@ export function LivePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
   const goodClasses = live?.goodClasses ?? run.live.goodClasses;
   const total = analytics.totalProducts;
   const camStatus = run.camera.status;
+  const health = header?.cameraHealth ?? run.camera.health;
 
   return (
     <div className="flex h-full">
@@ -160,6 +161,21 @@ export function LivePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
           )}
           {status && !status.gpu.cuda && <span className="text-amber-400">running on CPU</span>}
         </div>
+        {camStatus === "streaming" && streamConnected && (health?.dark || health?.slow) && (
+          <div role="alert" className="absolute left-4 top-24 flex max-w-md items-start gap-2 rounded-lg bg-amber-500/95 px-4 py-2 text-sm text-black shadow-lg">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-semibold">
+                {health.dark ? "Camera picture is too dark" : `Camera is slow (${stats.cameraFps?.toFixed(0) ?? "?"} fps)`}
+              </p>
+              <p className="text-xs">
+                {health.dark
+                  ? "Check the lighting and that the lens isn't covered. Dark images give unreliable results."
+                  : "Usually caused by low light (long exposure) or a USB bandwidth issue. Improve the lighting or try another USB port."}
+              </p>
+            </div>
+          </div>
+        )}
         {(camStatus !== "streaming" || !streamConnected) && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60">
             <div className="flex items-center gap-3 rounded-lg bg-amber-500/90 px-5 py-3 text-black">

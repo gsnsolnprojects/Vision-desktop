@@ -26,6 +26,7 @@ import {
   updatePreset,
   validatePresetName,
   type DisplaySettings,
+  type Precision,
   type RunPreset,
 } from "@/lib/presets";
 import { useStation } from "@/lib/station";
@@ -69,7 +70,7 @@ export function RunSetupPage({ onNavigate }: { onNavigate: (p: Page) => void }) 
   const [cameraId, setCameraId] = useState<string>(last?.cameraId ?? "");
   const [res, setRes] = useState({ w: last?.width ?? 1280, h: last?.height ?? 720 });
   const [fps, setFps] = useState(last?.fps ?? AUTO_FPS);
-  const [precision, setPrecision] = useState<"fp32" | "fp16">(last?.precision ?? "fp32");
+  const [precision, setPrecision] = useState<Precision>(last?.precision ?? "fp32");
   const [live, setLive] = useState<LiveSettings>(last?.live ?? DEFAULT_LIVE);
   const [display, setDisplay] = useState<DisplaySettings>(() => loadDisplay());
   const [starting, setStarting] = useState(false);
@@ -439,18 +440,30 @@ export function RunSetupPage({ onNavigate }: { onNavigate: (p: Page) => void }) 
 
             <div className="space-y-2">
               <Label>Precision</Label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 {(
                   [
-                    ["fp32", "Accurate (FP32)", "Identical results to Vision-M Studio"],
-                    ["fp16", "Fast (FP16)", "Faster on NVIDIA GPUs; tiny score differences"],
+                    ["fp32", "Accurate (FP32)", "Identical results to Vision-M Studio", true],
+                    ["fp16", "Fast (FP16)", "Faster on NVIDIA GPUs; tiny score differences", true],
+                    [
+                      "trt",
+                      "Fastest (TensorRT)",
+                      !model?.tensorrt?.supported
+                        ? "YOLO models on an NVIDIA GPU only"
+                        : model.tensorrt.ready
+                          ? "About 2x faster; optimised for this GPU"
+                          : "Optimize this model first (Models page)",
+                      !!model?.tensorrt?.ready,
+                    ],
                   ] as const
-                ).map(([v, title, desc]) => (
+                ).map(([v, title, desc, available]) => (
                   <button
                     key={v}
+                    type="button"
+                    disabled={!available}
                     onClick={() => setPrecision(v)}
                     className={cn(
-                      "rounded-md border p-3 text-left transition-colors",
+                      "rounded-md border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50",
                       precision === v ? "border-primary bg-primary/10" : "hover:bg-muted",
                     )}
                   >

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import { app } from "electron";
 import log from "./log";
+import { RuntimeManager } from "./runtime";
 import type { EngineInfo } from "../shared/ipc";
 
 const READY_TIMEOUT_MS = 60_000;
@@ -29,9 +30,12 @@ export class EngineManager extends EventEmitter {
   private stopping = false;
   private restartTimer: NodeJS.Timeout | null = null;
 
+  readonly runtime = new RuntimeManager();
+
   constructor(private readonly dataDir: string) {
     super();
     mkdirSync(dataDir, { recursive: true });
+    this.runtime.on("change", () => this.emit("change", this.info()));
   }
 
   info(): EngineInfo {
@@ -43,6 +47,7 @@ export class EngineManager extends EventEmitter {
       token: ready ? this.token : null,
       error: this.error,
       restarts: this.restarts,
+      setup: app.isPackaged && (this.state === "installing" || this.runtime.info().phase === "failed") ? this.runtime.info() : null,
     };
   }
 
@@ -54,8 +59,8 @@ export class EngineManager extends EventEmitter {
 
   private command(): { cmd: string; args: string[]; cwd: string } {
     if (app.isPackaged) {
-      const dir = join(process.resourcesPath, "engine");
-      return { cmd: join(dir, "visionm-engine.exe"), args: [], cwd: dir };
+      // Runtime venv (installed on first launch) running the engine code shipped with the app.
+      return { cmd: this.runtime.python, args: ["-m", "visionm_engine"], cwd: this.runtime.engineCodeDir };
     }
     const engineDir = join(app.getAppPath(), "engine");
     const venvPython = join(engineDir, ".venv", "Scripts", "python.exe");
@@ -65,6 +70,15 @@ export class EngineManager extends EventEmitter {
 
   start(): void {
     if (this.proc) return;
+    if (app.isPackaged && !this.runtime.isReady()) {
+      // First launch (or an app update with new AI components): install the runtime, then start.
+      this.setState("installing");
+      this.runtime.ensure().then(
+        () => this.start(),
+        (err) => this.setState("failed", `AI runtime setup failed: ${err instanceof Error ? err.message : String(err)}`),
+      );
+      return;
+    }
     this.stopping = false;
     this.port = null;
     this.setState(this.restarts > 0 ? "restarting" : "starting");
@@ -77,7 +91,7 @@ export class EngineManager extends EventEmitter {
     try {
       proc = spawn(cmd, fullArgs, {
         cwd,
-        env: { ...process.env, VISIONM_ENGINE_TOKEN: this.token, PYTHONUNBUFFERED: "1", PYTHONIOENCODING: "utf-8" },
+        env: { ...process.env, VISIONM_ENGINE_TOKEN: this.token, PYTHONUNBUFFERED: "1", PYTHONIOENCODING: "utf-8", ...(app.isPackaged ? { PYTHONPATH: this.runtime.engineCodeDir } : {}) },
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       });

@@ -10,7 +10,9 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test:engine": "cd engine && .venv/Scripts/python -m pytest -q"
+    "test:engine": "cd engine && .venv/Scripts/python -m pytest -q",
+    "prepare:python": "node scripts/prepare-python.mjs",
+    "dist": "npm run build && npm run prepare:python && electron-builder --win --x64 --publish never"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.2.0",
@@ -49,5 +51,58 @@
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.9.3",
     "vite": "^7.3.7"
+  },
+  "build": {
+    "appId": "in.gsnsoln.visionm.station",
+    "productName": "Vision-M Station",
+    "copyright": "GSN Solutions",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "build/python",
+        "to": "python"
+      },
+      {
+        "from": "engine/visionm_engine",
+        "to": "engine/visionm_engine",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "engine/requirements.lock",
+        "to": "engine/requirements.lock"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Vision-M-Station-Setup-${version}.${ext}",
+      "icon": "resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Vision-M Station",
+      "deleteAppDataOnUninstall": false
+    }
   }
 }

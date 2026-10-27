@@ -1,0 +1,21 @@
+# Vision-M Station AI runtime - exact versions tested on the reference station.
+# Installed by the desktop app on first launch (see src/main/runtime.ts).
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.5.1+cu121
+torchvision==0.20.1+cu121
+ultralytics==8.4.6
+rfdetr==1.7.0
+opencv-python==4.10.0.84
+numpy==2.1.3
+pillow==11.3.0
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+httpx==0.28.1
+openpyxl==3.1.5
+cv2-enumerate-cameras==1.4.0
+nvidia-ml-py==13.615.71
+psutil==5.9.4
+harvesters==1.4.3
+tensorrt-cu12==10.16.1.11
+onnx==1.19.1
+onnxslim==0.1.82

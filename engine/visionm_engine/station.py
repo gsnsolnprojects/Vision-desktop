@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Callable
 
 from .cameras import CameraSettings
-from .detectors import Detector, create_detector
+from .detectors import Detector, create_detector, is_rfdetr
+from .tensorrt_opt import TensorRtOptimizer, engine_info, engine_paths, tensorrt_version
 from .gpu import live_stats, resolve_device, system_info
 from .model_store import ModelStore, ModelStoreError, meta_to_json
 from .pipeline import Run
@@ -43,6 +44,7 @@ class Station:
         self._detector: Detector | None = None
         self._detector_key: tuple[str, str, str] | None = None
         self._gpu_info = system_info()
+        self.optimizer = TensorRtOptimizer()
         self._run: Run | None = None
         self._state = "idle"  # idle | starting | running | stopping
         self._last_error: str | None = None
@@ -92,6 +94,39 @@ class Station:
             "live": live_stats(index) if index is not None else None,
         }
 
+    def gpu_name(self, index: int | None) -> str | None:
+        gpus = [g for g in self._gpu_info["gpus"] if g.get("usable", True)]
+        g = next((g for g in gpus if g["index"] == (index or 0)), gpus[0] if gpus else None)
+        return g["name"] if g else None
+
+    def model_json(self, meta) -> dict:
+        """Model info plus whether a TensorRT engine is ready for this station's GPU."""
+        out = meta_to_json(meta)
+        _, weights = self.models.get(meta.id)
+        out["tensorrt"] = {
+            "supported": tensorrt_version() is not None and self._gpu_info["cuda"] and not is_rfdetr(meta, weights) and weights.suffix == ".pt",
+            "ready": engine_info(weights.parent, self.gpu_name(None)) is not None,
+            "gpuName": self.gpu_name(None),
+        }
+        return out
+
+    def optimize_model(self, model_id: str, gpu_index: int | None) -> dict:
+        if self._state != "idle":
+            raise StationError("Stop the run before optimising: building uses the GPU heavily", 409)
+        try:
+            meta, weights = self.models.get(model_id)
+        except ModelStoreError as exc:
+            raise StationError(str(exc), 404) from exc
+        if is_rfdetr(meta, weights) or weights.suffix != ".pt":
+            raise StationError("TensorRT optimisation is available for YOLO .pt models", 400)
+        if not self._gpu_info["cuda"]:
+            raise StationError("TensorRT needs an NVIDIA GPU", 400)
+        name = self.gpu_name(gpu_index)
+        try:
+            return self.optimizer.start(meta.id, weights, gpu_index or 0, name or "gpu").to_json()
+        except RuntimeError as exc:
+            raise StationError(str(exc), 409) from exc
+
     def gpu_info(self) -> dict:
         info = system_info()
         self._gpu_info = info
@@ -107,6 +142,7 @@ class Station:
                 "status": run.capture.status,
                 "error": run.capture.error,
                 "resolution": list(run.capture.resolution),
+                "health": run.capture.health.to_json(),
             },
             "analytics": run.analytics_json(),
             "stats": run.stats.to_json(),
@@ -126,11 +162,20 @@ class Station:
             except ModelStoreError as exc:
                 raise StationError(str(exc), 404) from exc
             device = resolve_device(req.gpu_index)
+            load_path, task = path, None
+            if req.precision == "trt":
+                if is_rfdetr(meta, path):
+                    raise StationError("TensorRT mode is for YOLO models. Use Accurate or Fast for RF-DETR.", 400)
+                gpu_name = self.gpu_name(int(device.split(":")[1]) if device.startswith("cuda:") else None)
+                info = engine_info(path.parent, gpu_name)
+                if info is None:
+                    raise StationError(f"This model isn't optimised for {gpu_name or 'this GPU'} yet. Open Models and click 'Optimize for this GPU'.", 409)
+                load_path, task = engine_paths(path.parent, gpu_name)[0], info.get("task")
             key = (meta.id, req.precision, device)
             if self._detector_key != key:
                 self._detector = None
                 log.info("Loading model %s (%s, %s) on %s", meta.name, meta.model_type, req.precision, device)
-                det = create_detector(meta, path, req.precision, device)
+                det = create_detector(meta, load_path, req.precision, device, task)
                 warm = det.warmup(req.camera.width, req.camera.height)
                 log.info("Model ready on %s, warm-up %.1f ms/frame", det.device, warm)
                 if det.class_names and det.class_names != meta.class_names:

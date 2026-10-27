@@ -42,7 +42,8 @@ def gpu_name() -> str | None:
 
 
 class Detector(ABC):
-    def __init__(self, meta: ModelMeta, path: Path, precision: str, device: str) -> None:
+    def __init__(self, meta: ModelMeta, path: Path, precision: str, device: str, task: str | None = None) -> None:
+        self.task = task
         self.meta = meta
         self.path = path
         self.precision = precision
@@ -73,7 +74,8 @@ class YoloDetector(Detector):
         except ImportError as exc:
             raise DetectorError("ultralytics is not installed") from exc
         try:
-            self._model = YOLO(str(self.path))
+            # TensorRT engines don't carry the task reliably; pass it explicitly when known.
+            self._model = YOLO(str(self.path), task=self.task) if self.task else YOLO(str(self.path))
         except Exception as exc:
             raise DetectorError(f"Failed to load YOLO model: {exc}") from exc
         names = getattr(self._model, "names", None)
@@ -165,10 +167,13 @@ class RfdetrDetector(Detector):
         return out
 
 
-def create_detector(meta: ModelMeta, path: Path, precision: str = "fp32", device: str = "cuda:0") -> Detector:
-    is_rfdetr = meta.model_type.upper().replace("-", "_") == "RF_DETR" or path.suffix == ".pth"
-    cls = RfdetrDetector if is_rfdetr else YoloDetector
-    det = cls(meta, path, precision, device)
+def is_rfdetr(meta: ModelMeta, path: Path) -> bool:
+    return meta.model_type.upper().replace("-", "_") == "RF_DETR" or path.suffix == ".pth"
+
+
+def create_detector(meta: ModelMeta, path: Path, precision: str = "fp32", device: str = "cuda:0", task: str | None = None) -> Detector:
+    cls = RfdetrDetector if is_rfdetr(meta, path) else YoloDetector
+    det = cls(meta, path, precision, device, task)
     det.load()
     return det
 

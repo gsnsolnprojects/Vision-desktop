@@ -9,6 +9,8 @@ export interface RuntimeSetup {
   detail: string | null;
   log: string[];
   error: string | null;
+  /** Step that was running when setup failed (to show where it stopped). */
+  failedPhase: RuntimeSetup["phase"] | null;
   startedAt: string | null;
 }
 

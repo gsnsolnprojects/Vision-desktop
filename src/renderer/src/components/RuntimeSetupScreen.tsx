@@ -25,7 +25,8 @@ export function RuntimeSetupScreen({ info }: { info: EngineInfo }) {
     return () => window.clearInterval(t);
   }, [setup?.startedAt, failed]);
 
-  const current = STEPS.findIndex((s) => setup && s.phase.includes(setup.phase));
+  const shownPhase = setup?.phase === "failed" ? setup.failedPhase : setup?.phase;
+  const current = STEPS.findIndex((s) => shownPhase != null && s.phase.includes(shownPhase));
 
   return (
     <div className="flex h-full items-center justify-center bg-[radial-gradient(ellipse_at_top,hsl(var(--primary)/0.15),transparent_60%)] p-6">

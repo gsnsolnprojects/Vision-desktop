@@ -25,7 +25,7 @@ interface Marker {
 }
 
 export class RuntimeManager extends EventEmitter {
-  private state: RuntimeSetup = { phase: "idle", message: "", detail: null, log: [], error: null, startedAt: null };
+  private state: RuntimeSetup = { phase: "idle", message: "", detail: null, log: [], error: null, failedPhase: null, startedAt: null };
   private running: Promise<void> | null = null;
 
   readonly root = join(app.getPath("userData"), "runtime");
@@ -93,7 +93,7 @@ export class RuntimeManager extends EventEmitter {
     mkdirSync(this.root, { recursive: true });
     const out = createWriteStream(this.logFile, { flags: "a" });
     const write = (l: string) => out.write(`${new Date().toISOString()} ${l}\n`);
-    this.update({ phase: "checking", message: "Preparing AI runtime…", detail: null, error: null, log: [], startedAt: new Date().toISOString() });
+    this.update({ phase: "checking", message: "Preparing AI runtime…", detail: null, error: null, failedPhase: null, log: [], startedAt: new Date().toISOString() });
     try {
       const free = statfsSync(this.root).bavail * statfsSync(this.root).bsize;
       if (free < MIN_FREE_BYTES) {
@@ -109,16 +109,34 @@ export class RuntimeManager extends EventEmitter {
         await this.run(this.basePython, ["-m", "venv", this.venv], write);
       }
 
-      this.update({ phase: "downloading", message: "Downloading AI components (about 4 GB, one time only)…" });
-      await this.run(
-        this.python,
-        ["-m", "pip", "install", "--disable-pip-version-check", "--no-input", "--progress-bar", "off", "-r", this.lockFile],
-        write,
-        (line) => this.onPipLine(line),
-      );
+      // Factory networks drop out: pip retries each request, and the whole step is retried a few times.
+      // Already-downloaded files are reused from pip's cache, so a retry only fetches what's missing.
+      const ATTEMPTS = 4;
+      for (let attempt = 1; ; attempt++) {
+        this.update({
+          phase: "downloading",
+          message: attempt === 1 ? "Downloading AI components (about 4 GB, one time only)…" : `Connection problem — retrying (attempt ${attempt} of ${ATTEMPTS})…`,
+        });
+        try {
+          await this.run(
+            this.python,
+            // --no-deps: the lock pins every package, so pip must not pull in anything newer.
+            ["-m", "pip", "install", "--disable-pip-version-check", "--no-input", "--progress-bar", "off", "--no-deps",
+              "--retries", "10", "--timeout", "60", "-r", this.lockFile],
+            write,
+            (line) => this.onPipLine(line),
+          );
+          break;
+        } catch (err) {
+          if (attempt >= ATTEMPTS) throw err;
+          write(`pip attempt ${attempt} failed; retrying in ${attempt * 15}s`);
+          await new Promise((r) => setTimeout(r, attempt * 15_000));
+        }
+      }
 
       this.update({ phase: "verifying", message: "Checking the installation…", detail: null });
-      await this.run(this.python, ["-c", "import torch, ultralytics, cv2, fastapi; print('cuda', torch.cuda.is_available())"], write, (l) =>
+      await this.run(this.python, ["-m", "pip", "check", "--disable-pip-version-check"], write, (l) => this.appendLog(l));
+      await this.run(this.python, ["-c", "import torch, ultralytics, cv2, fastapi, rfdetr, tensorrt, openpyxl, harvesters; print('cuda', torch.cuda.is_available())"], write, (l) =>
         this.appendLog(l),
       );
 
@@ -131,7 +149,7 @@ export class RuntimeManager extends EventEmitter {
       const msg = err instanceof Error ? err.message : String(err);
       write(`FAILED: ${msg}`);
       log.error(`Runtime setup failed: ${msg}`);
-      this.update({ phase: "failed", message: "AI runtime setup failed", error: msg });
+      this.update({ phase: "failed", message: "AI runtime setup failed", error: msg, failedPhase: this.state.phase === "failed" ? this.state.failedPhase : this.state.phase });
       throw err;
     } finally {
       out.end();

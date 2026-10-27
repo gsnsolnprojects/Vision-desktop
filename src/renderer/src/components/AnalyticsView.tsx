@@ -82,8 +82,8 @@ export function AnalyticsView({ analytics, goodClasses, startedAt, endedAt }: Pr
                       <Cell key={entry.key} fill={PIE_COLORS[i]} />
                     ))}
                   </Pie>
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <ChartLegend content={<ChartLegendContent />} />
+                  <ChartTooltip content={<ChartTooltipContent nameKey="key" />} />
+                  <ChartLegend content={<ChartLegendContent nameKey="key" />} />
                 </PieChart>
               </ChartContainer>
             </div>

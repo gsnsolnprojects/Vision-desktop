@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ArrowLeft, CloudOff, CloudUpload, Download, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { AnalyticsView } from "@/components/AnalyticsView";
+import { DefectThumb } from "@/components/DefectThumb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -224,7 +225,7 @@ function RunDetail({ runId, onBack }: { runId: string; onBack: () => void }) {
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
               {defects.map((d) => (
                 <button key={d.id} className="overflow-hidden rounded-md border text-left hover:border-primary" onClick={() => setPreview(d)}>
-                  {client && <img src={client.defectImageUrl(d.runId, d.id)} alt="" className="aspect-video w-full object-cover" loading="lazy" />}
+                  <DefectThumb defect={d} className="aspect-video w-full" />
                   <div className="p-2 text-xs">
                     <p className="truncate font-medium">{d.defectClasses.join(", ")}</p>
                     <p className="text-muted-foreground">{formatDateTime(d.timestamp)}</p>
@@ -240,7 +241,7 @@ function RunDetail({ runId, onBack }: { runId: string; onBack: () => void }) {
         <DialogContent className="max-w-5xl">
           {preview && client && (
             <div className="space-y-2">
-              <img src={client.defectImageUrl(preview.runId, preview.id)} alt="" className="w-full rounded-md" />
+              <DefectThumb defect={preview} size="full" className="aspect-video w-full rounded-md object-contain" />
               <p className="text-sm">
                 <span className="font-medium text-red-500">NOT OK</span> · {preview.defectClasses.join(", ")} · {formatDateTime(preview.timestamp)}
               </p>

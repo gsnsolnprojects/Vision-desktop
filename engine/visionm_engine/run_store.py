@@ -7,6 +7,7 @@ backend afterwards. A crash, power cut or network outage never loses results.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import uuid
@@ -46,6 +47,11 @@ CREATE TABLE IF NOT EXISTS defects (
     synced INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_defects_run ON defects(run_id, ts);
+-- Thumbnails live in the database: one file to open instead of thousands (antivirus scans every file open).
+CREATE TABLE IF NOT EXISTS defect_thumbs (
+    defect_id TEXT PRIMARY KEY REFERENCES defects(id) ON DELETE CASCADE,
+    data BLOB NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
 """
 
@@ -80,6 +86,10 @@ class RunStore:
             self._db.execute("ALTER TABLE runs ADD COLUMN name TEXT")
         if "notes" not in cols:
             self._db.execute("ALTER TABLE runs ADD COLUMN notes TEXT")
+        dcols = {r["name"] for r in self._db.execute("PRAGMA table_info(defects)").fetchall()}
+        if "image_removed" not in dcols:
+            # 1 = snapshot image deleted by retention / disk guard, or never saved (disk full); the record stays.
+            self._db.execute("ALTER TABLE defects ADD COLUMN image_removed INTEGER NOT NULL DEFAULT 0")
 
     def _exec(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -179,19 +189,33 @@ class RunStore:
 
     # ---------- defects ----------
 
-    def add_defect(self, run_id: str, classes: list[str], jpeg: bytes, ts: str | None = None) -> dict:
+    @staticmethod
+    def thumb_name(image_file: str) -> str:
+        return image_file[:-4] + ".thumb.jpg" if image_file.endswith(".jpg") else image_file + ".thumb.jpg"
+
+    def add_defect(
+        self, run_id: str, classes: list[str], jpeg: bytes | None, ts: str | None = None, thumb: bytes | None = None
+    ) -> dict:
+        """Record a NOT_OK defect. `jpeg=None` records it without a snapshot (e.g. disk almost full)."""
         defect_id = uuid.uuid4().hex
         image_file = f"{defect_id}.jpg"
-        path = self.dir / run_id / image_file
-        tmp = path.with_suffix(".part")
-        tmp.write_bytes(jpeg)
-        tmp.replace(path)
+        run_dir = self.dir / run_id
+        if jpeg is not None:
+            path = run_dir / image_file
+            tmp = path.with_suffix(".part")
+            tmp.write_bytes(jpeg)
+            tmp.replace(path)
         ts = ts or now_iso()
         self._exec(
-            "INSERT INTO defects (id, run_id, ts, verdict, classes_json, image_file) VALUES (?, ?, ?, 'NOT_OK', ?, ?)",
-            (defect_id, run_id, ts, json.dumps(classes), image_file),
+            "INSERT INTO defects (id, run_id, ts, verdict, classes_json, image_file, image_removed) VALUES (?, ?, ?, 'NOT_OK', ?, ?, ?)",
+            (defect_id, run_id, ts, json.dumps(classes), image_file, 0 if jpeg is not None else 1),
         )
-        return {"id": defect_id, "runId": run_id, "timestamp": ts, "verdict": "NOT_OK", "defectClasses": classes}
+        if jpeg is not None and thumb is not None:
+            self._exec("INSERT INTO defect_thumbs (defect_id, data) VALUES (?, ?)", (defect_id, thumb))
+        return {
+            "id": defect_id, "runId": run_id, "timestamp": ts, "verdict": "NOT_OK",
+            "defectClasses": classes, "hasImage": jpeg is not None,
+        }
 
     def list_defects(self, run_id: str, limit: int | None = None) -> list[dict]:
         sql = "SELECT * FROM defects WHERE run_id=? ORDER BY ts DESC"
@@ -207,16 +231,77 @@ class RunStore:
                 "verdict": r["verdict"],
                 "defectClasses": json.loads(r["classes_json"]),
                 "synced": bool(r["synced"]),
+                "hasImage": not r["image_removed"],
             }
             for r in self._exec(sql, params).fetchall()
         ]
 
-    def defect_image_path(self, run_id: str, defect_id: str) -> Path | None:
-        row = self._exec("SELECT image_file FROM defects WHERE id=? AND run_id=?", (defect_id, run_id)).fetchone()
-        if not row:
+    def defect_image_path(self, run_id: str, defect_id: str, thumb: bool = False) -> Path | None:
+        """Full snapshot, or its thumbnail when `thumb` (falls back to the full image for older snapshots)."""
+        row = self._exec("SELECT image_file, image_removed FROM defects WHERE id=? AND run_id=?", (defect_id, run_id)).fetchone()
+        if not row or row["image_removed"]:
             return None
-        p = self.dir / run_id / row["image_file"]
-        return p if p.is_file() else None
+        full = self.dir / run_id / row["image_file"]
+        if thumb:
+            t = self.dir / run_id / self.thumb_name(row["image_file"])
+            if t.is_file():
+                return t
+        return full if full.is_file() else None
+
+    def defect_thumb(self, run_id: str, defect_id: str) -> bytes | None:
+        """Thumbnail JPEG bytes from the database (None for snapshots saved before thumbnails existed)."""
+        row = self._exec(
+            "SELECT t.data FROM defect_thumbs t JOIN defects d ON d.id = t.defect_id WHERE d.id=? AND d.run_id=? AND d.image_removed=0",
+            (defect_id, run_id),
+        ).fetchone()
+        return bytes(row["data"]) if row else None
+
+    def run_thumbs(self, run_id: str) -> dict[str, bytes]:
+        """All thumbnails of a run in one query (Excel export)."""
+        rows = self._exec(
+            "SELECT t.defect_id, t.data FROM defect_thumbs t JOIN defects d ON d.id = t.defect_id WHERE d.run_id=? AND d.image_removed=0",
+            (run_id,),
+        ).fetchall()
+        return {r["defect_id"]: bytes(r["data"]) for r in rows}
+
+    # ---------- snapshot retention ----------
+
+    _PROTECT_UNSYNCED = """NOT (d.synced = 0 AND (SELECT sync_state FROM runs r WHERE r.id = d.run_id) != 'local_only')"""
+
+    def snapshots_older_than(self, cutoff_iso: str, protect_unsynced: bool, limit: int = 5000) -> list[sqlite3.Row]:
+        sql = "SELECT d.id, d.run_id, d.image_file FROM defects d WHERE d.image_removed = 0 AND d.ts < ?"
+        if protect_unsynced:
+            sql += " AND " + self._PROTECT_UNSYNCED
+        return self._exec(sql + " ORDER BY d.ts ASC LIMIT ?", (cutoff_iso, limit)).fetchall()
+
+    def oldest_snapshots(self, protect_unsynced: bool, limit: int = 500) -> list[sqlite3.Row]:
+        sql = "SELECT d.id, d.run_id, d.image_file FROM defects d WHERE d.image_removed = 0"
+        if protect_unsynced:
+            sql += " AND " + self._PROTECT_UNSYNCED
+        return self._exec(sql + " ORDER BY d.ts ASC LIMIT ?", (limit,)).fetchall()
+
+    def remove_snapshots(self, rows: list[sqlite3.Row]) -> int:
+        """Delete snapshot + thumbnail files; keep the defect records. Returns bytes freed."""
+        freed = 0
+        for r in rows:
+            for name in (r["image_file"], self.thumb_name(r["image_file"])):
+                f = self.dir / r["run_id"] / name
+                try:
+                    freed += f.stat().st_size
+                    f.unlink()
+                except FileNotFoundError:
+                    pass
+            self._exec("UPDATE defects SET image_removed=1 WHERE id=?", (r["id"],))
+            self._exec("DELETE FROM defect_thumbs WHERE defect_id=?", (r["id"],))
+        return freed
+
+    def snapshots_bytes(self) -> int:
+        total = 0
+        for run_dir in self.dir.iterdir():
+            if run_dir.is_dir():
+                with os.scandir(run_dir) as it:
+                    total += sum(e.stat().st_size for e in it if e.is_file())
+        return total
 
     # ---------- sync bookkeeping ----------
 

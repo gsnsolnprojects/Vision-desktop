@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Generic, TypeVar
 
-from .annotate import annotate, encode_jpeg
+from .annotate import annotate, encode_jpeg, make_thumbnail
 from .cameras import CameraError, CameraSettings, create_camera
 from .detectors import Detector
 from .run_store import RunStore, now_iso
@@ -180,6 +180,7 @@ class Run:
         on_defect: Callable[[dict], None],
         stream_quality: int,
         config_for_store: dict,
+        snapshots_allowed: Callable[[], bool] = lambda: True,
     ) -> None:
         self.run_id = run_id
         self.detector = detector
@@ -188,6 +189,7 @@ class Run:
         self.on_defect = on_defect
         self.stream_quality = stream_quality
         self.config_for_store = config_for_store
+        self.snapshots_allowed = snapshots_allowed
         self.started_at = now_iso()
 
         self._live = dict(live)
@@ -292,10 +294,13 @@ class Run:
 
     def _save_defect(self, frame: Frame, detections: list[Detection], outcome: FrameOutcome) -> None:
         try:
-            good = set(self._live["good_classes"])
-            snapshot = annotate(frame.image, detections, good, "NOT_OK")
             ts = datetime.fromtimestamp(frame.wall_time, timezone.utc).isoformat()
-            entry = self.store.add_defect(self.run_id, outcome.defect_event.defect_classes, encode_jpeg(snapshot, 85), ts)
+            jpeg = thumb = None
+            if self.snapshots_allowed():  # disk almost full -> still log the defect, just without an image
+                good = set(self._live["good_classes"])
+                snapshot = annotate(frame.image, detections, good, "NOT_OK")
+                jpeg, thumb = encode_jpeg(snapshot, 85), make_thumbnail(snapshot)
+            entry = self.store.add_defect(self.run_id, outcome.defect_event.defect_classes, jpeg, ts, thumb)
             self._last_defect_count += 1
             self.on_defect(entry)
         except Exception:

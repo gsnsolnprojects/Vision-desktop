@@ -6,11 +6,14 @@ import io
 from datetime import datetime
 from pathlib import Path
 
+import cv2
+
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XlImage
 from openpyxl.styles import Alignment, Font, PatternFill
-from PIL import Image
 
+
+from .annotate import make_thumbnail
 from .run_store import RunStore
 
 THUMB_W, THUMB_H = 160, 90
@@ -26,17 +29,17 @@ def _local(ts: str | None) -> str:
         return ts
 
 
-def _thumb(path: Path) -> XlImage:
-    with Image.open(path) as im:
-        im = im.convert("RGB")
-        im.thumbnail((THUMB_W * 2, THUMB_H * 2))  # 2x for sharpness on HiDPI
-        buf = io.BytesIO()
-        im.save(buf, format="JPEG", quality=80)
-    buf.seek(0)
-    xl = XlImage(buf)
+def _xl_image(data: bytes) -> XlImage:
+    xl = XlImage(io.BytesIO(data))
     ratio = min(THUMB_W / xl.width, THUMB_H / xl.height)
     xl.width, xl.height = int(xl.width * ratio), int(xl.height * ratio)
     return xl
+
+
+def _thumb_from_file(path: Path) -> bytes | None:
+    """Older snapshots without a stored thumbnail: decode at 1/4 size (fast) and shrink."""
+    img = cv2.imread(str(path), cv2.IMREAD_REDUCED_COLOR_4)
+    return make_thumbnail(img) if img is not None else None
 
 
 def build_run_report(store: RunStore, run_id: str) -> bytes:
@@ -103,15 +106,23 @@ def build_run_report(store: RunStore, run_id: str) -> bytes:
     logs.row_dimensions[1].height = 24
 
     defects = list(reversed(store.list_defects(run_id)))  # oldest first, like a log
+    thumbs = store.run_thumbs(run_id)
+    middle, wrap = Alignment(vertical="center"), Alignment(vertical="center", wrap_text=True)
     for idx, d in enumerate(defects, start=1):
         row = idx + 1
-        logs.append([idx, _local(d["timestamp"]), d["verdict"], ", ".join(d["defectClasses"]), "Live Camera", ""])
+        values = [idx, _local(d["timestamp"]), d["verdict"], ", ".join(d["defectClasses"]), "Live Camera", ""]
+        for col, v in enumerate(values, start=1):  # direct cell access: ws[row] rescans the whole sheet each time
+            c = logs.cell(row=row, column=col, value=v)
+            c.alignment = wrap if col == 4 else middle
         logs.row_dimensions[row].height = 72
-        for c in logs[row]:
-            c.alignment = Alignment(vertical="center", wrap_text=True)
-        img_path = store.defect_image_path(run_id, d["id"])
-        if img_path:
-            logs.add_image(_thumb(img_path), f"F{row}")
+        data = thumbs.get(d["id"])
+        if data is None and d["hasImage"]:
+            path = store.defect_image_path(run_id, d["id"])
+            data = _thumb_from_file(path) if path else None
+        if data is not None:
+            logs.add_image(_xl_image(data), f"F{row}")
+        elif not d["hasImage"]:
+            logs.cell(row=row, column=6, value="Snapshot removed")
 
     buf = io.BytesIO()
     wb.save(buf)

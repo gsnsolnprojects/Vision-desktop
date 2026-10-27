@@ -12,6 +12,7 @@ from .detectors import Detector, create_detector
 from .gpu import live_stats, resolve_device, system_info
 from .model_store import ModelStore, ModelStoreError, meta_to_json
 from .pipeline import Run
+from .maintenance import StorageMaintainer
 from .run_store import RunStore
 from .schemas import LiveSettingsPatch, StartRunRequest, UserIdentity
 from .sync import BackendSession, SyncWorker
@@ -34,6 +35,8 @@ class Station:
         self.runs = RunStore(data_dir)
         self.sync = SyncWorker(self.runs)
         self.sync.start()
+        self.storage = StorageMaintainer(self.runs, data_dir, uploads_enabled=lambda: self.sync.enabled)
+        self.storage.start()
         self._publish_frame = publish_frame
         self._publish_event = publish_event
         self._lock = threading.RLock()
@@ -71,6 +74,7 @@ class Station:
             "model": meta_to_json(self._detector.meta) if self._detector else None,
             "run": self._run_status(run) if run else None,
             "sync": self.sync.status(),
+            "storage": self.storage.status(),
         }
 
     def _gpu_status(self) -> dict:
@@ -158,6 +162,7 @@ class Station:
                 on_defect=lambda entry: self._publish_event({"type": "defect", "defect": entry}),
                 stream_quality=req.stream_quality,
                 config_for_store=config,
+                snapshots_allowed=self.storage.snapshots_allowed,
             )
             run.start()
             if not run.capture.first_frame.wait(self.FIRST_FRAME_TIMEOUT_S):
@@ -225,4 +230,5 @@ class Station:
             self.stop_run()
         finally:
             self.sync.stop()
+            self.storage.stop()
             self.runs.close()

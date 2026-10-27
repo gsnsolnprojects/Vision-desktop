@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/lib/auth";
 import { useStation } from "@/lib/station";
 import { GpuCard } from "@/components/GpuCard";
+import { StorageCard } from "@/components/StorageCard";
 import { errorMessage, formatDateTime } from "@/lib/utils";
 import type { AppInfo, AppSettings } from "../../../shared/ipc";
 
@@ -98,6 +99,8 @@ export function SettingsPage() {
       </Card>
 
       <GpuCard />
+
+      <StorageCard />
 
       <Card>
         <CardHeader>

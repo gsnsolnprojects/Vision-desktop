@@ -57,6 +57,12 @@ export function StationProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(t);
   }, [client, refreshStatus]);
 
+  // The engine forgets settings when it restarts: push the snapshot retention each time it becomes ready.
+  useEffect(() => {
+    if (!client) return;
+    void window.station.settings.get().then((s) => client.setRetention(s.snapshotRetentionDays).catch(() => undefined));
+  }, [client]);
+
   // Keep the engine's backend session current (login, token refresh, engine restart).
   useEffect(() => {
     if (!client) return;

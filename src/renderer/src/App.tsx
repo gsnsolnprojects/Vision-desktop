@@ -13,6 +13,7 @@ import { ReportsPage } from "@/pages/ReportsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { EngineBanner } from "@/components/EngineBanner";
 import { GpuWarningBanner } from "@/components/GpuWarningBanner";
+import { StorageWarningBanner } from "@/components/StorageWarningBanner";
 
 export type Page = "live" | "setup" | "models" | "reports" | "settings";
 
@@ -136,6 +137,7 @@ function Shell() {
       <main className="flex min-w-0 flex-1 flex-col">
         <EngineBanner />
         <GpuWarningBanner />
+        <StorageWarningBanner />
         <div className="min-h-0 flex-1 overflow-auto">
           {page === "live" && <LivePage onNavigate={setPage} />}
           {page === "setup" && <RunSetupPage onNavigate={setPage} />}

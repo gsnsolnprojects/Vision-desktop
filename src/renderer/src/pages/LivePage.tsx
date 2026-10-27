@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { AlertTriangle, BarChart3, Loader2, Maximize, Square, VideoOff } from "lucide-react";
 import { AnalyticsView } from "@/components/AnalyticsView";
 import { RunFinishedDialog } from "@/components/RunFinishedDialog";
+import { DefectThumb } from "@/components/DefectThumb";
 import { LiveCanvas } from "@/components/LiveCanvas";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -218,7 +219,7 @@ export function LivePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
               <div className="space-y-2">
                 {defects.map((d) => (
                   <div key={d.id} className="flex gap-3 rounded-md border p-2">
-                    {client && <img src={client.defectImageUrl(d.runId, d.id)} alt="" className="h-14 w-24 rounded object-cover" loading="lazy" />}
+                    <DefectThumb defect={d} className="h-14 w-24 shrink-0 rounded" />
                     <div className="min-w-0 text-xs">
                       <p className="font-medium text-red-500">NOT OK</p>
                       <p className="truncate">{d.defectClasses.join(", ")}</p>

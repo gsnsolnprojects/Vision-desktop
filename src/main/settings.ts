@@ -10,6 +10,7 @@ const DEFAULTS: AppSettings = {
   startFullscreen: false,
   uploadEnabled: false,
   gpuIndex: null,
+  snapshotRetentionDays: 30,
 };
 
 function path(): string {
@@ -39,6 +40,9 @@ export function updateSettings(patch: Partial<AppSettings>): AppSettings {
   if (typeof patch.startFullscreen === "boolean") next.startFullscreen = patch.startFullscreen;
   if (typeof patch.uploadEnabled === "boolean") next.uploadEnabled = patch.uploadEnabled;
   if (patch.gpuIndex === null || (Number.isInteger(patch.gpuIndex) && (patch.gpuIndex as number) >= 0)) next.gpuIndex = patch.gpuIndex ?? null;
+  if ([0, 7, 30, 90, 365].includes(patch.snapshotRetentionDays as number)) {
+    next.snapshotRetentionDays = patch.snapshotRetentionDays as AppSettings["snapshotRetentionDays"];
+  }
   const tmp = `${path()}.tmp`;
   writeFileSync(tmp, JSON.stringify(next, null, 2));
   renameSync(tmp, path());

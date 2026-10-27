@@ -68,6 +68,10 @@ class SessionRequest(ApiModel):
     upload_enabled: bool = False
 
 
+class StorageConfig(ApiModel):
+    retention_days: Literal[0, 7, 30, 90, 365] = 30  # 0 = keep snapshots forever
+
+
 class RunMetaPatch(ApiModel):
     name: str | None = Field(None, max_length=120)
     notes: str | None = Field(None, max_length=2000)

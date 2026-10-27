@@ -12,6 +12,7 @@ import logging
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,7 +23,7 @@ from .cameras import list_cameras
 from .detectors import preload_runtime
 from .exporter import build_run_report
 from .model_store import ModelStoreError, meta_to_json
-from .schemas import ImportModelRequest, LibraryModelInfo, LiveSettingsPatch, RunMetaPatch, SessionRequest, StartRunRequest
+from .schemas import ImportModelRequest, LibraryModelInfo, LiveSettingsPatch, RunMetaPatch, SessionRequest, StartRunRequest, StorageConfig
 from .station import Station, StationError
 
 log = logging.getLogger(__name__)
@@ -139,6 +140,19 @@ def create_app(data_dir: Path, token: str) -> FastAPI:
     def status() -> dict:
         return station.status()
 
+    @app.get("/storage", dependencies=[Depends(auth)])
+    def storage() -> dict:
+        return station.storage.status()
+
+    @app.put("/storage/config", dependencies=[Depends(auth)])
+    def storage_config(body: StorageConfig) -> dict:
+        station.storage.set_retention(body.retention_days)
+        return station.storage.status()
+
+    @app.post("/storage/cleanup", dependencies=[Depends(auth)])
+    def storage_cleanup() -> dict:
+        return station.storage.cleanup()
+
     @app.get("/gpus", dependencies=[Depends(auth)])
     def gpus() -> dict:
         return station.gpu_info()
@@ -232,7 +246,12 @@ def create_app(data_dir: Path, token: str) -> FastAPI:
         return {"ok": True}
 
     @app.get("/runs/{run_id}/defects/{defect_id}/image", dependencies=[Depends(auth)])
-    def defect_image(run_id: str, defect_id: str) -> FileResponse:
+    def defect_image(run_id: str, defect_id: str, size: Literal["full", "thumb"] = "full") -> Response:
+        cache = {"Cache-Control": "private, max-age=31536000, immutable"}
+        if size == "thumb":
+            data = station.runs.defect_thumb(run_id, defect_id)
+            if data is not None:
+                return Response(data, media_type="image/jpeg", headers=cache)
         path = station.runs.defect_image_path(run_id, defect_id)
         if path is None:
             raise HTTPException(404, "Image not found")

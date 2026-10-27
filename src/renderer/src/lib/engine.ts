@@ -85,6 +85,20 @@ export interface DefectEntry {
   verdict: "NOT_OK";
   defectClasses: string[];
   synced?: boolean;
+  /** false when the snapshot image was removed (retention / low disk) or never saved (disk full). */
+  hasImage?: boolean;
+}
+
+export interface StorageStatus {
+  retentionDays: number;
+  snapshotsBytes: number | null;
+  freeBytes: number;
+  totalBytes: number;
+  lowDisk: boolean;
+  snapshotsPaused: boolean;
+  lastCleanupAt: string | null;
+  lastRemoved: number;
+  lastFreedBytes: number;
 }
 
 export interface ActiveRun {
@@ -102,6 +116,7 @@ export interface EngineStatus {
   gpu: { cuda: boolean; name: string | null; index: number | null; device: string; count: number; live: GpuLive | null };
   model: StationModel | null;
   run: ActiveRun | null;
+  storage?: StorageStatus;
   sync: { enabled: boolean; signedIn: boolean; pendingRuns: number; lastError: string | null; lastSuccessAt: string | null };
 }
 
@@ -198,6 +213,9 @@ export class EngineClient {
 
   status = () => this.request<EngineStatus>("GET", "/status");
   gpus = () => this.request<GpuSystemInfo>("GET", "/gpus");
+  storage = () => this.request<StorageStatus>("GET", "/storage");
+  setRetention = (retentionDays: number) => this.request<StorageStatus>("PUT", "/storage/config", { retentionDays });
+  cleanupStorage = () => this.request<StorageStatus>("POST", "/storage/cleanup");
   cameras = () => this.request<{ cameras: CameraInfo[] }>("GET", "/cameras").then((r) => r.cameras);
   models = () => this.request<{ models: StationModel[] }>("GET", "/models").then((r) => r.models);
   importModel = (path: string, name?: string) =>
@@ -223,8 +241,8 @@ export class EngineClient {
     this.request("POST", "/session", session);
   clearSession = () => this.request("DELETE", "/session");
 
-  defectImageUrl(runId: string, defectId: string): string {
-    return `${this.baseUrl}/runs/${runId}/defects/${defectId}/image?t=${this.token}`;
+  defectImageUrl(runId: string, defectId: string, size: "full" | "thumb" = "full"): string {
+    return `${this.baseUrl}/runs/${runId}/defects/${defectId}/image?size=${size}&t=${this.token}`;
   }
 
   streamUrl(): string {

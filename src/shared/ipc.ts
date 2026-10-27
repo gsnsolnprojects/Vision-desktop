@@ -19,6 +19,8 @@ export interface AppSettings {
   uploadEnabled: boolean;
   /** Which NVIDIA GPU runs inference on multi-GPU PCs. null = the first one. */
   gpuIndex: number | null;
+  /** Delete defect snapshot images older than this many days (0 = keep forever). Run records are always kept. */
+  snapshotRetentionDays: 0 | 7 | 30 | 90 | 365;
 }
 
 export interface BackendRequest {

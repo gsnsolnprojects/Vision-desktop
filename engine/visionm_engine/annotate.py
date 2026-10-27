@@ -18,6 +18,17 @@ def encode_jpeg(image: np.ndarray, quality: int = 85) -> bytes:
     return buf.tobytes()
 
 
+THUMB_WIDTH = 320
+
+
+def make_thumbnail(image: np.ndarray, quality: int = 80) -> bytes:
+    """Small JPEG for report grids and Excel export (keeps aspect ratio)."""
+    h, w = image.shape[:2]
+    scale = THUMB_WIDTH / w
+    small = cv2.resize(image, (THUMB_WIDTH, max(1, int(round(h * scale)))), interpolation=cv2.INTER_AREA)
+    return encode_jpeg(small, quality)
+
+
 def annotate(image: np.ndarray, detections: list[Detection], good_classes: set[str], verdict: str | None) -> np.ndarray:
     out = image.copy()
     h, w = out.shape[:2]

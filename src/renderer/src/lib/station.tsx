@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { EngineInfo } from "../../../shared/ipc";
 import { useAuth } from "./auth";
-import { EngineClient, useEngine, type DefectEntry, type EngineStatus, type FrameHeader } from "./engine";
+import { EngineClient, useEngine, type DefectEntry, type EngineStatus, type FrameHeader, type PreviewHeader } from "./engine";
 
 export interface LiveFrame {
   header: FrameHeader;
@@ -9,6 +9,12 @@ export interface LiveFrame {
 }
 
 type FrameListener = (frame: LiveFrame) => void;
+
+export interface PreviewFrame {
+  header: PreviewHeader;
+  bitmap: ImageBitmap;
+}
+type PreviewListener = (frame: PreviewFrame) => void;
 type DefectListener = (defect: DefectEntry) => void;
 
 interface StationState {
@@ -20,6 +26,8 @@ interface StationState {
   streamConnected: boolean;
   refreshStatus(): Promise<void>;
   subscribeFrames(cb: FrameListener): () => void;
+  /** Run Setup camera preview frames (no model). */
+  subscribePreview(cb: PreviewListener): () => void;
   subscribeDefects(cb: DefectListener): () => void;
 }
 
@@ -36,6 +44,8 @@ export function StationProvider({ children }: { children: ReactNode }) {
   const frameListeners = useRef(new Set<FrameListener>());
   const defectListeners = useRef(new Set<DefectListener>());
   const lastFrame = useRef<LiveFrame | null>(null);
+  const previewListeners = useRef(new Set<PreviewListener>());
+  const lastPreview = useRef<PreviewFrame | null>(null);
 
   const refreshStatus = useCallback(async () => {
     if (!client) return;
@@ -113,7 +123,24 @@ export function StationProvider({ children }: { children: ReactNode }) {
         const buf = ev.data as ArrayBuffer;
         const view = new DataView(buf);
         const len = view.getUint32(0);
-        const hdr = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, len))) as FrameHeader;
+        const parsed = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, len))) as FrameHeader | PreviewHeader;
+        if (parsed.type === "preview") {
+          decoding = true;
+          try {
+            const bitmap = await createImageBitmap(new Blob([new Uint8Array(buf, 4 + len)], { type: "image/jpeg" }));
+            const frame = { header: parsed, bitmap };
+            const prev = lastPreview.current;
+            lastPreview.current = frame;
+            previewListeners.current.forEach((cb) => cb(frame));
+            prev?.bitmap.close();
+          } catch {
+            /* corrupt frame; skip */
+          } finally {
+            decoding = false;
+          }
+          return;
+        }
+        const hdr = parsed;
         decoding = true;
         try {
           const bitmap = await createImageBitmap(new Blob([new Uint8Array(buf, 4 + len)], { type: "image/jpeg" }));
@@ -166,6 +193,13 @@ export function StationProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const subscribePreview = useCallback((cb: PreviewListener) => {
+    previewListeners.current.add(cb);
+    return () => {
+      previewListeners.current.delete(cb);
+    };
+  }, []);
+
   const subscribeDefects = useCallback((cb: DefectListener) => {
     defectListeners.current.add(cb);
     return () => {
@@ -174,8 +208,8 @@ export function StationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<StationState>(
-    () => ({ engineInfo, client, status, header, streamConnected, refreshStatus, subscribeFrames, subscribeDefects }),
-    [engineInfo, client, status, header, streamConnected, refreshStatus, subscribeFrames, subscribeDefects],
+    () => ({ engineInfo, client, status, header, streamConnected, refreshStatus, subscribeFrames, subscribePreview, subscribeDefects }),
+    [engineInfo, client, status, header, streamConnected, refreshStatus, subscribeFrames, subscribePreview, subscribeDefects],
   );
   return <StationContext.Provider value={value}>{children}</StationContext.Provider>;
 }

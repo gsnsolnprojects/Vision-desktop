@@ -1,4 +1,4 @@
-import type { LiveSettings } from "./engine";
+import type { CameraControlValues, LiveSettings } from "./engine";
 
 /** A saved run configuration ("Line 1 – Bottle cap"). Stored per station. */
 export interface RunPreset {
@@ -10,6 +10,10 @@ export interface RunPreset {
   width: number;
   height: number;
   fps: number;
+  /** Camera output format. Older presets have none = "auto". */
+  pixelFormat?: PixelFormat;
+  /** Camera image controls (exposure, gain, ...). None = camera defaults. */
+  cameraControls?: CameraControlValues | null;
   precision: Precision;
   live: LiveSettings;
   display: DisplaySettings;
@@ -17,6 +21,8 @@ export interface RunPreset {
 }
 
 export type Precision = "fp32" | "fp16" | "trt";
+
+export type PixelFormat = "auto" | "mjpg" | "yuy2";
 
 export interface DisplaySettings {
   showBoxes: boolean;
@@ -100,6 +106,8 @@ export function presetConfigKey(cfg: PresetConfig): string {
     width: cfg.width,
     height: cfg.height,
     fps: cfg.fps,
+    pixelFormat: cfg.pixelFormat ?? "auto",
+    cameraControls: cfg.cameraControls ? Object.fromEntries(Object.entries(cfg.cameraControls).sort(([a], [b]) => a.localeCompare(b))) : null,
     precision: cfg.precision,
     live: { ...cfg.live, goodClasses: [...cfg.live.goodClasses].sort() },
     display: { ...DEFAULT_DISPLAY, ...(cfg.display ?? {}) },

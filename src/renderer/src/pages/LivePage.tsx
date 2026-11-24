@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { AlertTriangle, BarChart3, Loader2, Maximize, Square, VideoOff } from "lucide-react";
 import { AnalyticsView } from "@/components/AnalyticsView";
 import { RunFinishedDialog } from "@/components/RunFinishedDialog";
+import { LiveCameraSettings } from "@/components/LiveCameraSettings";
 import { DefectThumb } from "@/components/DefectThumb";
 import { LiveCanvas } from "@/components/LiveCanvas";
 import { Button } from "@/components/ui/button";
@@ -148,12 +149,29 @@ export function LivePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
             {VERDICT_STYLE[verdict].label}
           </div>
         )}
+        {run.camera.warning && (
+          <div role="alert" className="absolute left-1/2 top-4 flex max-w-[60%] -translate-x-1/2 items-start gap-2 rounded-md bg-amber-500/90 px-3 py-2 text-xs text-black shadow-lg">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{run.camera.warning}</span>
+          </div>
+        )}
         <div className="tabular absolute bottom-3 left-3 flex gap-3 rounded-md bg-black/60 px-3 py-1.5 text-xs text-slate-200">
           <span>{stats.inferFps != null ? `${stats.inferFps.toFixed(1)} FPS` : "– FPS"}</span>
           <span>inference {stats.inferMs != null ? `${stats.inferMs.toFixed(1)} ms` : "–"}</span>
           <span>latency {stats.latencyMs != null ? `${stats.latencyMs.toFixed(0)} ms` : "–"}</span>
-          {run.camera.resolution[0] > 0 && <span>{run.camera.resolution.join("×")}</span>}
+          {run.camera.resolution[0] > 0 && (
+            <span>
+              {run.camera.resolution.join("×")}
+              {run.camera.pixelFormat ? ` ${run.camera.pixelFormat}` : ""}
+            </span>
+          )}
           {stats.cameraFps != null && <span>camera {stats.cameraFps.toFixed(0)} fps</span>}
+          {stats.brightness != null && (
+            <span className={cn(stats.brightness < 35 || stats.brightness > 225 ? "text-amber-400" : undefined)}>
+              brightness {stats.brightness.toFixed(0)}/255
+              {stats.brightness < 35 ? " · too dark" : stats.brightness > 225 ? " · too bright" : ""}
+            </span>
+          )}
           {status?.gpu.live && (
             <span title={status.gpu.name ?? undefined}>
               GPU {status.gpu.live.utilization}% · {status.gpu.live.temperatureC}°C
@@ -223,6 +241,8 @@ export function LivePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
               <Row label="Labels" checked={display.showLabels} onChange={(v) => updateDisplay({ showLabels: v })} />
             </div>
           )}
+
+          {run.camera.cameraId && <LiveCameraSettings runId={run.id} cameraId={run.camera.cameraId} presetName={run.presetName ?? null} />}
 
           <div className="border-t pt-4">
             <div className="mb-2 flex items-center justify-between">

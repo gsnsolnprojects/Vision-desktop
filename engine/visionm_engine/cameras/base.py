@@ -28,6 +28,12 @@ class CameraSettings:
     width: int = 1280
     height: int = 720
     fps: int = 0  # 0 = auto: the fastest rate the camera really sustains
+    # "auto": compressed MJPG when the camera offers it (USB 2 webcams need it for speed),
+    # otherwise the camera's own format (e.g. uncompressed YUY2 on USB 3 cameras).
+    pixel_format: str = "auto"  # auto | mjpg | yuy2
+    # Image controls to apply when the camera opens: {key: {"value": int | None, "auto": bool}}.
+    # None = leave the camera as it is.
+    controls: dict | None = None
 
 
 class CameraError(RuntimeError):
@@ -37,6 +43,9 @@ class CameraError(RuntimeError):
 class CameraSource(ABC):
     def __init__(self, settings: CameraSettings) -> None:
         self.settings = settings
+        # Filled in by open(): what the device really delivers, and a warning if it is less than asked for.
+        self.actual_format: str | None = None
+        self.warning: str | None = None
 
     @abstractmethod
     def open(self) -> None:

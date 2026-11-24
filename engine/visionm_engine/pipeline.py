@@ -84,6 +84,8 @@ class CaptureWorker(threading.Thread):
         self.status = "connecting"  # connecting | streaming | reconnecting
         self.error: str | None = None
         self.resolution = (0, 0)
+        self.pixel_format: str | None = None
+        self.warning: str | None = None
         self.fps = Ema(0.05)
         self.first_frame = threading.Event()
         self.health = CameraHealth()
@@ -96,6 +98,8 @@ class CaptureWorker(threading.Thread):
             try:
                 camera.open()
                 self.resolution = camera.actual_resolution
+                self.pixel_format = camera.actual_format
+                self.warning = camera.warning
                 self.status, self.error, backoff = "streaming", None, 0.5
                 failures = 0
                 last = time.perf_counter()
@@ -336,6 +340,7 @@ class Run:
                     "stats": {
                         **self.stats.to_json(),
                         "cameraFps": round(self.capture.fps.value, 1) if self.capture.fps.value else None,
+                        "brightness": round(self.capture.health.brightness, 1) if self.capture.health.brightness is not None else None,
                         "inferMsFrame": round(r.infer_ms, 2),
                         "latencyMsFrame": round(r.latency_ms, 2),
                     },

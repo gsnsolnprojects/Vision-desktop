@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 import threading
 from pathlib import Path
 from typing import Callable
 
-from .cameras import CameraSettings
+from .cameras import CameraSettings, apply_camera_controls, resolve_camera_id
 from .detectors import Detector, create_detector, is_rfdetr
 from .tensorrt_opt import TensorRtOptimizer, engine_info, engine_paths, tensorrt_version
 from .gpu import live_stats, resolve_device, system_info
 from .model_store import ModelStore, ModelStoreError, meta_to_json
 from .pipeline import Run
+from .preview import Preview
 from .maintenance import StorageMaintainer
 from .run_store import RunStore
 from .schemas import LiveSettingsPatch, StartRunRequest, UserIdentity
@@ -46,6 +48,8 @@ class Station:
         self._gpu_info = system_info()
         self.optimizer = TensorRtOptimizer()
         self._run: Run | None = None
+        self._preview: Preview | None = None
+        self._preview_lock = threading.Lock()
         self._state = "idle"  # idle | starting | running | stopping
         self._last_error: str | None = None
         self._user: UserIdentity | None = None
@@ -76,6 +80,7 @@ class Station:
             "model": meta_to_json(self._detector.meta) if self._detector else None,
             "run": self._run_status(run) if run else None,
             "sync": self.sync.status(),
+            "preview": self._preview.status() if self._preview and self._preview.alive else None,
             "storage": self.storage.status(),
         }
 
@@ -138,10 +143,15 @@ class Station:
             "id": run.run_id,
             "startedAt": run.started_at,
             "live": run.config_for_store.get("live"),
+            "presetName": run.config_for_store.get("presetName"),
             "camera": {
+                "cameraId": run.capture.settings.camera_id,
+                "cameraName": (run.config_for_store.get("camera") or {}).get("cameraName"),
                 "status": run.capture.status,
                 "error": run.capture.error,
                 "resolution": list(run.capture.resolution),
+                "pixelFormat": run.capture.pixel_format,
+                "warning": run.capture.warning,
                 "health": run.capture.health.to_json(),
             },
             "analytics": run.analytics_json(),
@@ -150,7 +160,59 @@ class Station:
 
     # ---------- run lifecycle ----------
 
+    def record_run_controls(self, camera_id: str, values: dict) -> None:
+        """Camera settings changed during a run: keep them in the run's saved config (shown in the report)."""
+        run = self._run
+        if run is None or run.capture.settings.camera_id != camera_id:
+            return
+        cam = run.config_for_store.setdefault("camera", {})
+        merged = dict(cam.get("controls") or {})
+        merged.update(values)
+        cam["controls"] = merged
+        run.capture.settings.controls = merged  # reapplied if the camera reconnects
+
+    # ---------- camera preview (Run Setup) ----------
+
+    def start_preview(self, settings: CameraSettings, max_width: int | None = None) -> dict:
+        if self._run is not None:
+            raise StationError("Stop the run before previewing a camera", 409)
+        with self._preview_lock:
+            current = self._preview
+            if current and current.alive and replace(current.settings, controls=None) == replace(settings, controls=None):
+                # Same camera / size / rate: no need to reopen it. New image controls are applied live.
+                current.keepalive()
+                if max_width:
+                    current.max_width = max(160, min(int(max_width), 4096))
+                if settings.controls and settings.controls != current.settings.controls:
+                    try:
+                        apply_camera_controls(settings.camera_id, settings.controls)
+                    except Exception:
+                        log.warning("Could not apply camera settings to the running preview", exc_info=True)
+                    current.settings = settings
+                return current.status()
+            if current:
+                current.stop()
+            self._preview = Preview(settings, self._publish_frame, max_width or 960)
+            self._preview.start()
+            return self._preview.status()
+
+    def keepalive_preview(self) -> bool:
+        p = self._preview
+        if p and p.alive:
+            p.keepalive()
+            return True
+        return False
+
+    def stop_preview(self, camera_id: str | None = None) -> None:
+        """Stop the preview (only if it uses `camera_id`, when given). Frees the camera for runs and checks."""
+        with self._preview_lock:
+            p = self._preview
+            if p and (camera_id is None or p.camera_id == camera_id):
+                p.stop()
+                self._preview = None
+
     def start_run(self, req: StartRunRequest) -> dict:
+        self.stop_preview()  # a run needs the camera (and the GPU) to itself
         with self._lock:
             if self._state != "idle":
                 raise StationError(f"Cannot start: station is {self._state}", 409)
@@ -199,7 +261,12 @@ class Station:
                 run_id=run_id,
                 detector=detector,
                 camera=CameraSettings(
-                    camera_id=req.camera.camera_id, width=req.camera.width, height=req.camera.height, fps=req.camera.fps
+                    camera_id=resolve_camera_id(req.camera.camera_id, req.camera.camera_name),
+                    width=req.camera.width,
+                    height=req.camera.height,
+                    fps=req.camera.fps,
+                    pixel_format=req.camera.pixel_format,
+                    controls=req.camera.settings_controls(),
                 ),
                 live=req.live.model_dump(),
                 store=self.runs,
@@ -272,6 +339,7 @@ class Station:
 
     def shutdown(self) -> None:
         try:
+            self.stop_preview()
             self.stop_run()
         finally:
             self.sync.stop()

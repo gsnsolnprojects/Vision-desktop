@@ -23,7 +23,7 @@ from .cameras import list_cameras
 from .detectors import preload_runtime
 from .exporter import build_run_report
 from .model_store import ModelStoreError, meta_to_json
-from .schemas import ImportModelRequest, LibraryModelInfo, LiveSettingsPatch, RunMetaPatch, SessionRequest, StartRunRequest, StorageConfig
+from .schemas import CameraCheckRequest, CameraControlsRequest, PreviewStartRequest, ImportModelRequest, LibraryModelInfo, LiveSettingsPatch, RunMetaPatch, SessionRequest, StartRunRequest, StorageConfig
 from .station import Station, StationError
 
 log = logging.getLogger(__name__)
@@ -168,6 +168,69 @@ def create_app(data_dir: Path, token: str) -> FastAPI:
         return {"ok": True}
 
     # ---------- cameras ----------
+
+    @app.post("/cameras/check", dependencies=[Depends(auth)])
+    def camera_check(body: CameraCheckRequest) -> dict:
+        from .camera_check import check_camera
+        from .cameras import CameraSettings, resolve_camera_id
+
+        active = station._run  # noqa: SLF001
+        if active is not None and active.capture.settings.camera_id == body.camera.camera_id:
+            raise StationError("This camera is in use by the running inspection. Stop the run to check it.", 409)
+        station.stop_preview(body.camera.camera_id)  # the check needs the camera to itself
+        c = body.camera
+        settings = CameraSettings(
+            camera_id=resolve_camera_id(c.camera_id, c.camera_name), width=c.width, height=c.height, fps=c.fps, pixel_format=c.pixel_format, controls=c.settings_controls()
+        )
+        return check_camera(settings, c.camera_name)
+
+    @app.get("/cameras/modes", dependencies=[Depends(auth)])
+    def camera_mode_list(camera_id: str = Query(alias="cameraId"), name: str | None = None) -> dict:
+        from .cameras import camera_modes
+
+        return {"modes": camera_modes(camera_id, name)}
+
+    @app.post("/preview/start", dependencies=[Depends(auth)])
+    def preview_start(body: PreviewStartRequest) -> dict:
+        from .cameras import CameraSettings, resolve_camera_id
+
+        c = body.camera
+        return station.start_preview(
+            CameraSettings(
+                camera_id=resolve_camera_id(c.camera_id, c.camera_name), width=c.width, height=c.height, fps=c.fps, pixel_format=c.pixel_format, controls=c.settings_controls()
+            ),
+            body.max_width,
+        )
+
+    @app.get("/cameras/controls", dependencies=[Depends(auth)])
+    def camera_control_list(camera_id: str = Query(alias="cameraId")) -> dict:
+        from .cameras import camera_controls
+
+        return {"controls": camera_controls(camera_id)}
+
+    @app.post("/cameras/controls", dependencies=[Depends(auth)])
+    def camera_control_apply(body: CameraControlsRequest) -> dict:
+        """Apply image controls now (works while the preview or a run is streaming)."""
+        from .cameras import CameraError, apply_camera_controls
+
+        values = {k: v.model_dump() for k, v in body.values.items()}
+        try:
+            result = apply_camera_controls(body.camera_id, values)
+            station.record_run_controls(body.camera_id, values)
+            return result
+        except CameraError as exc:
+            raise StationError(str(exc), 400) from exc
+        except Exception as exc:
+            raise StationError(f"Could not change camera settings: {exc}", 500) from exc
+
+    @app.post("/preview/keepalive", dependencies=[Depends(auth)])
+    def preview_keepalive() -> dict:
+        return {"active": station.keepalive_preview()}
+
+    @app.post("/preview/stop", dependencies=[Depends(auth)])
+    def preview_stop() -> dict:
+        station.stop_preview()
+        return {"ok": True}
 
     @app.get("/cameras", dependencies=[Depends(auth)])
     def cameras() -> dict:

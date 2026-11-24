@@ -63,6 +63,8 @@ export interface RunStats {
   latencyMs?: number | null;
   inferFps?: number | null;
   cameraFps?: number | null;
+  /** Mean picture brightness 0-255 (live runs). */
+  brightness?: number | null;
 }
 
 export type Verdict = "NO_PRODUCT" | "OK" | "NOT_OK";
@@ -123,7 +125,17 @@ export interface ActiveRun {
   id: string;
   startedAt: string;
   live: LiveSettings & Record<string, unknown>;
-  camera: { status: "connecting" | "streaming" | "reconnecting"; error: string | null; resolution: [number, number]; health?: CameraHealth };
+  presetName?: string | null;
+  camera: {
+    cameraId?: string;
+    cameraName?: string | null;
+    status: "connecting" | "streaming" | "reconnecting";
+    error: string | null;
+    resolution: [number, number];
+    pixelFormat?: string | null;
+    warning?: string | null;
+    health?: CameraHealth;
+  };
   analytics: RunAnalytics;
   stats: RunStats;
 }
@@ -136,6 +148,62 @@ export interface EngineStatus {
   run: ActiveRun | null;
   storage?: StorageStatus;
   sync: { enabled: boolean; signedIn: boolean; pendingRuns: number; lastError: string | null; lastSuccessAt: string | null };
+  preview?: { cameraId: string; status: string; error: string | null; resolution: [number, number]; pixelFormat: string | null; warning: string | null } | null;
+}
+
+/** An image control the camera supports (exposure, gain, white balance, ...). */
+export interface CameraControl {
+  key: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+  value: number;
+  auto: boolean;
+  autoSupported: boolean;
+}
+
+/** Saved control values: { exposure: { value: -6, auto: false }, ... } */
+export type CameraControlValues = Record<string, { value: number | null; auto: boolean }>;
+
+/** A size the camera really supports, with its top frame rate. */
+export interface CameraMode {
+  width: number;
+  height: number;
+  maxFps: number;
+  formats: string[];
+}
+
+/** Header of a Run Setup preview frame (no model, just the camera). */
+export interface PreviewHeader {
+  type: "preview";
+  cameraId: string;
+  seq: number;
+  width: number;
+  height: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  pixelFormat: string | null;
+  warning: string | null;
+  cameraFps: number | null;
+  sharpness: number | null;
+  brightness: number | null;
+}
+
+export interface CameraCheckItem {
+  key: string;
+  label: string;
+  status: "ok" | "warn" | "error";
+  value: string;
+  tip: string | null;
+}
+
+export interface CameraCheckResult {
+  ok: boolean;
+  items: CameraCheckItem[];
+  preview: string | null;
+  measured?: { width: number; height: number; fps: number; format: string | null; brightness: number; sharpness: number; openSeconds: number };
 }
 
 export interface GpuLive {
@@ -168,7 +236,7 @@ export interface RunRecord {
   cameraName: string | null;
   config: {
     live?: LiveSettings;
-    camera?: { cameraId: string; cameraName?: string; width: number; height: number; fps: number };
+    camera?: { cameraId: string; cameraName?: string; width: number; height: number; fps: number; pixelFormat?: string };
     precision?: string;
     presetName?: string | null;
   };
@@ -191,7 +259,15 @@ export interface DownloadJob {
 
 export interface StartRunRequest {
   modelId: string;
-  camera: { cameraId: string; cameraName?: string; width: number; height: number; fps: number };
+  camera: {
+    cameraId: string;
+    cameraName?: string;
+    width: number;
+    height: number;
+    fps: number;
+    pixelFormat?: "auto" | "mjpg" | "yuy2";
+    controls?: CameraControlValues | null;
+  };
   live: LiveSettings;
   precision: "fp32" | "fp16" | "trt";
   gpuIndex?: number | null;
@@ -234,6 +310,18 @@ export class EngineClient {
   storage = () => this.request<StorageStatus>("GET", "/storage");
   setRetention = (retentionDays: number) => this.request<StorageStatus>("PUT", "/storage/config", { retentionDays });
   cleanupStorage = () => this.request<StorageStatus>("POST", "/storage/cleanup");
+  /** Sizes / top frame rates the camera supports, or null if it can't report them. */
+  cameraModes = (cameraId: string, name?: string) =>
+    this.request<{ modes: CameraMode[] | null }>("GET", `/cameras/modes?cameraId=${encodeURIComponent(cameraId)}${name ? `&name=${encodeURIComponent(name)}` : ""}`).then((r) => r.modes);
+  cameraControls = (cameraId: string) =>
+    this.request<{ controls: CameraControl[] | null }>("GET", `/cameras/controls?cameraId=${encodeURIComponent(cameraId)}`).then((r) => r.controls);
+  applyCameraControls = (cameraId: string, values: CameraControlValues) =>
+    this.request<{ applied: string[]; skipped: string[]; controls: CameraControl[] }>("POST", "/cameras/controls", { cameraId, values });
+  previewStart = (camera: StartRunRequest["camera"], maxWidth?: number) => this.request("POST", "/preview/start", { camera, maxWidth });
+  previewKeepalive = () => this.request<{ active: boolean }>("POST", "/preview/keepalive");
+  previewStop = () => this.request("POST", "/preview/stop");
+  /** Opens the camera for a few seconds and reports size, speed, format, brightness and focus. */
+  checkCamera = (camera: StartRunRequest["camera"]) => this.request<CameraCheckResult>("POST", "/cameras/check", { camera });
   cameras = () => this.request<{ cameras: CameraInfo[] }>("GET", "/cameras").then((r) => r.cameras);
   models = () => this.request<{ models: StationModel[] }>("GET", "/models").then((r) => r.models);
   importModel = (path: string, name?: string) =>

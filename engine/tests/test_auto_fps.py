@@ -50,3 +50,8 @@ def test_dark_camera_probe_is_time_boxed(monkeypatch):
     elapsed = _t.perf_counter() - t0
     assert elapsed < 4.5, elapsed
     assert 1 <= fps <= 3
+
+
+def test_50fps_camera_uses_50(monkeypatch):
+    # e.g. Arducam B0495 at 1920x1200: max 50 fps
+    assert run(50, monkeypatch) == (50, 50)

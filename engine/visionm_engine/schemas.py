@@ -32,12 +32,37 @@ class LiveSettingsPatch(ApiModel):
     center_guide_percent: float | None = Field(None, ge=40, le=95)
 
 
+class CameraControlValue(ApiModel):
+    value: int | None = None
+    auto: bool = False
+
+
 class CameraConfig(ApiModel):
     camera_id: str
     camera_name: str | None = None
     width: int = Field(1280, ge=160, le=7680)
     height: int = Field(720, ge=120, le=4320)
     fps: int = Field(0, ge=0, le=240)  # 0 = auto (fastest the camera sustains)
+    pixel_format: Literal["auto", "mjpg", "yuy2"] = "auto"
+    # Image controls saved with the preset (exposure, gain, white balance, ...). None = leave camera as is.
+    controls: dict[str, CameraControlValue] | None = None
+
+    def settings_controls(self) -> dict | None:
+        return {k: v.model_dump() for k, v in self.controls.items()} if self.controls else None
+
+
+class CameraControlsRequest(ApiModel):
+    camera_id: str
+    values: dict[str, CameraControlValue]
+
+
+class CameraCheckRequest(ApiModel):
+    camera: CameraConfig
+
+
+class PreviewStartRequest(ApiModel):
+    camera: CameraConfig
+    max_width: int | None = Field(None, ge=160, le=4096)  # None = light preview; tuner asks for full size
 
 
 class StartRunRequest(ApiModel):

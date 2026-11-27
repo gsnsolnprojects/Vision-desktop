@@ -6,7 +6,7 @@ Windows desktop app for running Vision-M models on a production line. Camera cap
 
 ```
 Electron UI (React)  ──localhost HTTP/WebSocket + secret token──▶  Python engine (engine/)
-   login (Supabase)                                                 camera thread → GPU inference thread → publisher
+   login (VisionBackend)                                            camera thread → GPU inference thread → publisher
    backend calls via main process                                   verdict / counts / defect log (port of Studio logic)
    first-run AI runtime installer                                   SQLite run store (crash-safe) → background sync to VisionBackend
 ```
@@ -66,7 +66,7 @@ python -m venv --system-site-packages .venv
 # app
 cd ..
 npm install
-cp .env.example .env   # Supabase URL + publishable key
+cp .env.example .env   # default API address (sign-in goes through it)
 npm run dev
 ```
 

@@ -7,10 +7,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/lib/auth";
-import { listLibraryModels, type LibraryModel } from "@/lib/backend";
+import { backendCall, listLibraryModels, type LibraryModel } from "@/lib/backend";
 import type { DownloadJob, OptimizeJob, StationModel } from "@/lib/engine";
 import { useStation } from "@/lib/station";
-import { supabase } from "@/lib/supabase";
 import { errorMessage, formatBytes, formatDateTime } from "@/lib/utils";
 import type { Page } from "@/App";
 
@@ -56,22 +55,15 @@ export function ModelsPage({ onNavigate }: { onNavigate: (p: Page) => void }) {
     void refreshLocal();
   }, [refreshLocal]);
 
-  // Projects of the user's workspace (same source as the web app).
+  // Projects of the user's workspace (same source as the web app: /api/account/projects, newest first).
   useEffect(() => {
     if (!profile?.companyId) return;
-    void supabase
-      .from("projects")
-      .select("id, name")
-      .eq("company_id", profile.companyId)
-      .order("created_at", { ascending: false })
-      .then(({ data, error }) => {
-        if (error) {
-          setLibraryError(`Could not load projects: ${error.message}`);
-          return;
-        }
+    void backendCall<{ projects: Project[] }>({ method: "GET", path: "/account/projects", headers: backendHeaders() })
+      .then(({ projects: data }) => {
         setProjects(data ?? []);
         if (data?.length && !data.some((p) => p.id === projectId)) setProjectId(data[0].id);
-      });
+      })
+      .catch((error: unknown) => setLibraryError(`Could not load projects: ${errorMessage(error)}`));
   }, [profile?.companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshLibrary = useCallback(async () => {
